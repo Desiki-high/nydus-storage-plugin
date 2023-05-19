@@ -1,0 +1,47 @@
+name: Test
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main]
+
+env:
+  NYDUS_VERSION: v2.1.6
+
+jobs:
+  build:
+    name: Build
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.18'
+      - name: Login ghcr
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.48.0
+          export PATH=$PATH:$(go env GOPATH)/bin
+          make check
+          make build
+      - name: Test
+        run: |
+          curl -L https://github.com/dragonflyoss/image-service/releases/download/${{env.NYDUS_VERSION}}/nydus-static-${{env.NYDUS_VERSION}}-linux-amd64.tgz > nydus-static-${{env.NYDUS_VERSION}}-linux-amd64.tgz
+          tar xzvf nydus-static-$NYDUS_VERSION-linux-amd64.tgz
+          sudo mv nydus-static/nydusd /usr/bin/nydusd
+          sudo mv nydus-static/nydusify /usr/bin/nydusify
+          sudo mv nydus-static/nydus-image /usr/bin/nydus-image
+          sudo mkdir -p /var/lib/nydus-store
+          sudo cp misc/nydus-config.json /etc/nydusd-config.json
+          sudo cp misc/storage.conf /etc/containers/storage.conf
+          nohup sudo bin/nydus-store --log-to-stdout --log-level info --config-path /etc/nydusd-config.json --root /var/lib/nydus-store &
+          sudo bash test.sh
